@@ -1,339 +1,38 @@
 (() => {
-  'use strict';
-
-  const $ = selector => document.querySelector(selector);
-
-  const input = $('#message-input');
-  const messages = $('#messages');
-  const sendButton = $('#send-button');
-  const micButton = $('#mic-button');
-  const stopButton = $('#stop-button');
-  const stage = $('#avatar-stage');
-  const statusLabel = $('#status-label');
-  const orbLabel = $('#orb-label');
-  const connectionLabel = $('#connection-label');
-  const toast = $('#toast');
-
-  // Add your deployed backend URL here later.
-  // Example: https://your-subaru-api.example.com
-  // Never put your private API key in this file.
-  const API_BASE_URL = 'https://saul-goodman-81en.onrender.com';
-
-  let toastTimer;
-  let recognition = null;
-  let isBusy = false;
-
-  function showToast(message) {
-    if (!toast) return;
-
-    toast.textContent = message;
-    toast.classList.add('show');
-
-    clearTimeout(toastTimer);
-
-    toastTimer = setTimeout(() => {
-      toast.classList.remove('show');
-    }, 2600);
-  }
-
-  function setState(state, label) {
-    if (stage) stage.dataset.state = state;
-    if (statusLabel) statusLabel.textContent = label;
-
-    if (orbLabel) {
-      orbLabel.textContent = ({
-        idle: 'SUBARU IS HERE',
-        listening: "I'M LISTENING",
-        thinking: 'GIVE ME A SECOND',
-        speaking: "I'M SPEAKING"
-      })[state] || 'SUBARU IS HERE';
-    }
-  }
-
-  function appendMessage(role, text) {
-    const article = document.createElement('article');
-
-    article.className =
-      `message ${role === 'user' ? 'user-message' : 'assistant-message'}`;
-
-    article.innerHTML = `
-      <div class="message-avatar">S<span>.</span></div>
-      <div class="bubble-wrap">
-        <div class="message-name">
-          ${role === 'user' ? 'YOU' : 'SUBARU'}
-          <span>· ${role === 'user' ? 'MESSAGE' : 'RESPONSE'}</span>
-        </div>
-        <div class="bubble"></div>
-      </div>
-    `;
-
-    // textContent prevents messages from being interpreted as HTML.
-    $('.bubble', article).textContent = text;
-
-    messages.appendChild(article);
-    messages.scrollTop = messages.scrollHeight;
-
-    return article;
-  }
-
-  // Browser speech output.
-  // The actual voice depends on the voices installed on your device.
-  function chooseVoice() {
-    if (!('speechSynthesis' in window)) return null;
-
-    const voices = window.speechSynthesis.getVoices();
-
-    return (
-      voices.find(v =>
-        /en-IN/i.test(v.lang) &&
-        /google|natural|neural/i.test(v.name)
-      ) ||
-      voices.find(v => /en-IN/i.test(v.lang)) ||
-      voices.find(v =>
-        /^en(-|$)/i.test(v.lang) &&
-        /google|natural|neural/i.test(v.name)
-      ) ||
-      voices.find(v => /^en(-|$)/i.test(v.lang)) ||
-      null
-    );
-  }
-
-  function speak(text) {
-    if (!('speechSynthesis' in window)) {
-      showToast('Speech output is not supported in this browser.');
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voice = chooseVoice();
-
-    if (voice) utterance.voice = voice;
-
-    utterance.lang = voice?.lang || 'en-IN';
-    utterance.rate = 1.02;
-    utterance.pitch = 0.88;
-    utterance.volume = 1;
-
-    utterance.onstart = () => {
-      setState('speaking', 'SPEAKING');
-    };
-
-    utterance.onend = () => {
-      setState(
-        'idle',
-        API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
-      );
-    };
-
-    utterance.onerror = () => {
-      setState(
-        'idle',
-        API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
-      );
-    };
-
-    window.speechSynthesis.speak(utterance);
-  }
-
-  // Honest fallback while the AI backend is disconnected.
-  function localReply(text) {
-    const message = text.toLowerCase();
-
-    if (/^(hi|hey|hello|yo)\b/.test(message)) {
-      return "Hey. Subaru here. I'm listening. What's on your mind?";
-    }
-
-    if (/\bwho are you\b|\bwhat are you\b/.test(message)) {
-      return "I'm Subaru, your personal assistant. My interface is running, but my full AI brain still needs the secure backend connection.";
-    }
-
-    if (/\bhelp\b|\bwhat can you do\b/.test(message)) {
-      return "I can receive your messages and use your browser's speech features. Once the backend is connected, I'll be able to use a real AI model for conversation and reasoning. Right now, I'm in local mode.";
-    }
-
-    return "I received your message. My AI backend isn't connected yet, so I won't pretend to have fully analysed it. Connect the backend to activate my real AI reasoning.";
-  }
-
-  // Real AI requests go to your separate backend.
-  async function askAI(text) {
-    if (!API_BASE_URL) {
-      return {
-        reply: localReply(text),
-        connected: false
-      };
-    }
-
-    const response = await fetch(
-      `${API_BASE_URL.replace(/\/$/, '')}/api/chat`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          message: text
-        })
-      }
-    );
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-
-      throw new Error(
-        data.error || `Backend returned HTTP ${response.status}.`
-      );
-    }
-
-    const data = await response.json();
-
-    if (typeof data.reply !== 'string' || !data.reply.trim()) {
-      throw new Error('The AI backend returned an empty response.');
-    }
-
-    return {
-      reply: data.reply.trim(),
-      connected: true
-    };
-  }
-
-  async function sendMessage(value = input.value) {
-    const text = value.trim();
-
-    if (!text || isBusy) return;
-
-    appendMessage('user', text);
-
-    input.value = '';
-    input.style.height = 'auto';
-
-    isBusy = true;
-    sendButton.disabled = true;
-
-    setState('thinking', 'THINKING');
-
-    try {
-      const result = await askAI(text);
-
-      appendMessage('assistant', result.reply);
-
-      connectionLabel.textContent = result.connected
-        ? 'AI CONNECTED'
-        : 'LOCAL MODE · AI NOT CONNECTED';
-
-      if (result.connected) {
-        speak(result.reply);
-      } else {
-        setState('idle', 'LOCAL MODE');
-      }
-    } catch (error) {
-      appendMessage(
-        'assistant',
-        `I couldn't reach my AI brain: ${error.message}\n\nCheck that the backend is running and its URL is configured correctly.`
-      );
-
-      setState('idle', 'CONNECTION ERROR');
-
-      showToast('Could not connect to Subaru’s AI backend.');
-    } finally {
-      isBusy = false;
-      sendButton.disabled = false;
-      input.focus();
-    }
-  }
-
-  sendButton.addEventListener('click', () => {
-    sendMessage();
-  });
-
-  input.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      sendMessage();
-    }
-  });
-
-  input.addEventListener('input', () => {
-    input.style.height = 'auto';
-
-    input.style.height =
-      `${Math.min(input.scrollHeight, 150)}px`;
-  });
-
-  // Stop voice output.
-  stopButton.addEventListener('click', () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-
-    setState(
-      'idle',
-      API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
-    );
-  });
-
-  // Voice input.
-  const SpeechRecognition =
-    window.SpeechRecognition ||
-    window.webkitSpeechRecognition;
-
-  if (SpeechRecognition) {
-    recognition = new SpeechRecognition();
-
-    recognition.lang = 'en-IN';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      setState('listening', 'LISTENING');
-      micButton.classList.add('listening');
-    };
-
-    recognition.onresult = event => {
-      input.value = event.results[0][0].transcript;
-      sendMessage();
-    };
-
-    recognition.onerror = () => {
-      showToast('Could not hear that clearly. Try again or type.');
-    };
-
-    recognition.onend = () => {
-      micButton.classList.remove('listening');
-
-      if (stage.dataset.state === 'listening') {
-        setState(
-          'idle',
-          API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
-        );
-      }
-    };
-
-    micButton.addEventListener('click', () => {
-      try {
-        recognition.start();
-      } catch {
-        showToast('Voice recognition is already active.');
-      }
-    });
-  } else {
-    micButton.addEventListener('click', () => {
-      showToast('Voice input may require Chrome on Android.');
-    });
-  }
-
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.onvoiceschanged = () => {};
-  }
-
-  // Initial state.
-  connectionLabel.textContent = API_BASE_URL
-    ? 'AI CONNECTED'
-    : 'LOCAL MODE · AI NOT CONNECTED';
-
-  setState(
-    'idle',
-    API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
-  );
+'use strict';
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const API='https://saul-goodman-81en.onrender.com';
+const K={chats:'subaru.v3.chats',current:'subaru.v3.current',tasks:'subaru.v3.tasks',memory:'subaru.v3.memory',speech:'subaru.v3.speech',save:'subaru.v3.save'};
+const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}}, put=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
+let chats=read(K.chats,[]),tasks=read(K.tasks,[]),memory=read(K.memory,[]),current=localStorage.getItem(K.current),busy=false,timer;
+const id=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+if(!chats.some(c=>c.id===current)){current=id();chats.unshift({id:current,title:'New conversation',updated:Date.now(),messages:[]});}
+const chat=()=>chats.find(c=>c.id===current);
+function saveChats(){if(localStorage.getItem(K.save)!=='false')put(K.chats,chats);localStorage.setItem(K.current,current)}
+function toast(s){$('#toast').textContent=s;$('#toast').classList.add('show');clearTimeout(timer);timer=setTimeout(()=>$('#toast').classList.remove('show'),2600)}
+function state(s,label){$('#avatar-stage').dataset.state=s;$('#avatar-caption').textContent=({idle:'READY WHEN YOU ARE',listening:'I’M LISTENING',thinking:'THINKING IT THROUGH',speaking:'I’M SPEAKING'})[s]||label}
+function addMsg(role,text,save=true){const el=document.createElement('article');el.className='message';el.innerHTML=`<div class="message-avatar">${role==='user'?'Y':'S.'}</div><div><div class="message-meta">${role==='user'?'YOU · MESSAGE':'SUBARU · RESPONSE'}</div><div class="bubble"></div><div class="message-actions">${role==='assistant'?'<button class="mini-action" data-copy>Copy response</button><button class="mini-action" data-speak>Speak</button>':''}</div></div>`;$('.bubble',el).textContent=text;const copy=$('[data-copy]',el),speak=$('[data-speak]',el);if(copy)copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);toast('Copied.')}catch{toast('Copy unavailable.')}};if(speak)speak.onclick=()=>say(text);$('.message-actions',el).style.display=role==='assistant'?'flex':'none';$('#messages').append(el);$('#messages').scrollTop=$('#messages').scrollHeight;if(save){const c=chat();c.messages.push({role,text,time:Date.now()});c.updated=Date.now();if(c.title==='New conversation'&&role==='user')c.title=text.slice(0,44);saveChats()}}
+function renderChat(){const m=$('#messages');m.innerHTML='';const c=chat();$('#hero').style.display=c.messages.length?'none':'';c.messages.forEach(x=>addMsg(x.role,x.text,false))}
+async function ask(text){const r=await fetch(API+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,conversationId:current})});if(!r.ok)throw Error((await r.text().catch(()=>''))||`Backend returned ${r.status}`);const d=await r.json();if(!d.reply?.trim())throw Error('Empty reply from backend');return d.reply.trim()}
+async function send(value=$('#message-input').value){const t=value.trim();if(!t||busy)return;$('#hero').style.display='none';addMsg('user',t);$('#message-input').value='';$('#message-input').style.height='auto';busy=true;$('#send-button').disabled=true;state('thinking','THINKING');const wait=document.createElement('article');wait.className='message';wait.innerHTML='<div class="message-avatar">S.</div><div><div class="message-meta">SUBARU · WORKING</div><div class="bubble">Thinking through it…</div></div>';$('#messages').append(wait);try{const reply=await ask(t);wait.remove();addMsg('assistant',reply);if(localStorage.getItem(K.speech)!=='false')say(reply);else state('idle','AI ONLINE')}catch(e){wait.remove();addMsg('assistant',`I couldn't reach the AI service.\n\n${e.message}\n\nIf the health endpoint works, check the Render logs and AI provider environment variables.`);state('idle','CONNECTION ERROR');toast('AI request failed. Check Render logs.')}finally{busy=false;$('#send-button').disabled=false}}
+function voice(){const vs=speechSynthesis.getVoices(),en=vs.filter(v=>/^en[-_]/i.test(v.lang));return en.find(v=>/male|david|mark|guy|daniel|aaron|james|alex/i.test(v.name))||en.find(v=>/google/i.test(v.name))||en[0]||vs[0]}
+function say(text){if(!('speechSynthesis'in window)){toast('Speech output unavailable.');return}speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text),v=voice();if(v)u.voice=v;u.lang=v?.lang||'en-US';u.pitch=.86;u.rate=1;u.onstart=()=>state('speaking','SPEAKING');u.onend=()=>state('idle','AI ONLINE');u.onerror=()=>state('idle','AI ONLINE');speechSynthesis.speak(u)}
+function view(v){$$('.view').forEach(e=>e.classList.toggle('active',e.dataset.panel===v));$$('.nav').forEach(e=>e.classList.toggle('active',e.dataset.view===v));const t={chat:['ASSISTANT',"Let's think it through."],history:['CONVERSATIONS','Pick up where you left off.'],tasks:['TASKS & PLANS','Make the next move.'],memory:['MEMORY','Keep what matters.'],settings:['SETTINGS','Make it work for you.']}[v];$('#section').textContent=t[0];$('#title').textContent=t[1];$('#sidebar').classList.remove('open');if(v==='history')renderHistory();if(v==='tasks')renderTasks();if(v==='memory')renderMemory()}
+function row(text,button,fn,sub=''){const e=document.createElement('div');e.className='row';const span=document.createElement('span');span.textContent=text;if(sub){const sm=document.createElement('small');sm.textContent=sub;span.append(sm)}e.append(span);if(button){const b=document.createElement('button');b.textContent=button;b.onclick=fn;e.append(b)}return e}
+function renderHistory(){const root=$('#history-list');root.innerHTML='';if(!chats.length){root.innerHTML='<div class="empty">No saved conversations yet.</div>';return}[...chats].sort((a,b)=>b.updated-a.updated).forEach(c=>root.append(row(c.title,'Open',()=>{current=c.id;saveChats();renderChat();view('chat')},`${c.messages.length} messages · ${new Date(c.updated).toLocaleString()}`)))}
+function renderTasks(){const root=$('#task-list');root.innerHTML='';if(!tasks.length){root.innerHTML='<div class="empty">No tasks yet. Add one above.</div>';return}tasks.forEach(t=>{const e=document.createElement('div');e.className='row';const cb=document.createElement('input');cb.type='checkbox';cb.checked=t.done;cb.onchange=()=>{t.done=cb.checked;put(K.tasks,tasks);renderTasks()};const span=document.createElement('span');span.textContent=t.text;if(t.done)span.style.textDecoration='line-through';const b=document.createElement('button');b.textContent='Delete';b.onclick=()=>{tasks=tasks.filter(x=>x.id!==t.id);put(K.tasks,tasks);renderTasks()};e.append(cb,span,b);root.append(e)})}
+function renderMemory(){const root=$('#memory-list');root.innerHTML='';if(!memory.length){root.innerHTML='<div class="empty">Nothing saved yet. Add only what you want stored on this device.</div>';return}memory.forEach(m=>root.append(row(m.text,'Delete',()=>{memory=memory.filter(x=>x.id!==m.id);put(K.memory,memory);renderMemory()})))}
+$('#send-button').onclick=()=>send();$('#message-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}};$('#message-input').oninput=e=>{e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,140)+'px'};
+$('#new-chat').onclick=()=>{current=id();chats.unshift({id:current,title:'New conversation',updated:Date.now(),messages:[]});saveChats();renderChat();view('chat')};
+$$('[data-view]').forEach(e=>e.onclick=()=>view(e.dataset.view));$$('[data-prompt]').forEach(e=>e.onclick=()=>{ $('#message-input').value=e.dataset.prompt;send() });$('#settings').onclick=()=>view('settings');$('#menu').onclick=()=>$('#sidebar').classList.toggle('open');
+$('#task-form').onsubmit=e=>{e.preventDefault();const t=$('#task-input').value.trim();if(!t)return;tasks.unshift({id:id(),text:t,done:false});put(K.tasks,tasks);$('#task-input').value='';renderTasks()};
+$('#memory-form').onsubmit=e=>{e.preventDefault();const t=$('#memory-input').value.trim();if(!t)return;memory.unshift({id:id(),text:t});put(K.memory,memory);$('#memory-input').value='';renderMemory();toast('Saved locally on this device.')};
+$('#clear-memory').onclick=()=>{if(confirm('Clear all saved notes on this device?')){memory=[];put(K.memory,memory);renderMemory()}};
+$('#speech-toggle').checked=localStorage.getItem(K.speech)!=='false';$('#speech-toggle').onchange=e=>localStorage.setItem(K.speech,e.target.checked?'true':'false');
+$('#history-toggle').checked=localStorage.getItem(K.save)!=='false';$('#history-toggle').onchange=e=>{localStorage.setItem(K.save,e.target.checked?'true':'false');if(!e.target.checked)localStorage.removeItem(K.chats);else saveChats()};
+$('#clear-history').onclick=()=>{if(confirm('Clear all conversations from this browser?')){chats=[];current=id();chats.push({id:current,title:'New conversation',updated:Date.now(),messages:[]});saveChats();renderChat();toast('History cleared.')}};
+$('#stop-button').onclick=()=>{if('speechSynthesis'in window)speechSynthesis.cancel();state('idle','AI ONLINE')};
+const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition; if(Recognition){const rec=new Recognition();rec.lang='en-IN';rec.interimResults=false;rec.onstart=()=>{state('listening','LISTENING');$('#mic-button').style.color='#ff9a55'};rec.onresult=e=>{ $('#message-input').value=e.results[0][0].transcript;send()};rec.onerror=()=>toast('Could not hear clearly. Try typing.');rec.onend=()=>{$('#mic-button').style.color='';state('idle','AI ONLINE')};$('#mic-button').onclick=()=>{try{rec.start()}catch{toast('Already listening.')}}}else $('#mic-button').onclick=()=>toast('Try Chrome on Android for voice input.');
+async function health(){try{const r=await fetch(API+'/health');if(!r.ok)throw Error();$('#connection-label').textContent='BACKEND REACHABLE';$('#connection-dot').classList.add('online');$('#metric-ai').textContent='Server reachable'}catch{$('#connection-label').textContent='BACKEND UNREACHABLE';$('#connection-dot').classList.add('offline');$('#metric-ai').textContent='Unreachable'}}
+$('#metric-voice').textContent='speechSynthesis'in window?'Available':'Unavailable';renderChat();health();
 })();
