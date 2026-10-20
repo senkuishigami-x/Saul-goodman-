@@ -1,53 +1,28 @@
 (() => {
   'use strict';
 
-  const $ = (selector, root = document) => root.querySelector(selector);
-  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const $ = selector => document.querySelector(selector);
 
-  const STORAGE = {
-    tasks: 'subaru.tasks.v1',
-    memory: 'subaru.memory.v1'
-  };
-
-  const promptInput = $('#prompt-input');
-  const responseArea = $('#response-area');
-  const coreState = $('#core-state');
+  const input = $('#message-input');
+  const messages = $('#messages');
+  const sendButton = $('#send-button');
+  const micButton = $('#mic-button');
+  const stopButton = $('#stop-button');
+  const stage = $('#avatar-stage');
+  const statusLabel = $('#status-label');
+  const orbLabel = $('#orb-label');
+  const connectionLabel = $('#connection-label');
   const toast = $('#toast');
 
+  // Add your deployed backend URL here later.
+  // Example: https://your-subaru-api.example.com
+  // Never put your private API key in this file.
+  const API_BASE_URL = '';
+
   let toastTimer;
+  let recognition = null;
+  let isBusy = false;
 
-  // LOCAL STORAGE
-  function readStore(key, fallback = []) {
-    try {
-      const value = JSON.parse(localStorage.getItem(key));
-      return Array.isArray(value) ? value : fallback;
-    } catch {
-      return fallback;
-    }
-  }
-
-  function writeStore(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-      return true;
-    } catch {
-      showToast('Browser storage is unavailable.');
-      return false;
-    }
-  }
-
-  // SECURITY: ESCAPE HTML
-  function escapeHTML(value) {
-    return String(value).replace(/[&<>"']/g, char => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
-    }[char]));
-  }
-
-  // NOTIFICATIONS
   function showToast(message) {
     if (!toast) return;
 
@@ -58,491 +33,307 @@
 
     toastTimer = setTimeout(() => {
       toast.classList.remove('show');
-    }, 2400);
+    }, 2600);
   }
 
-  function setCoreState(state) {
-    if (coreState) coreState.textContent = state;
+  function setState(state, label) {
+    if (stage) stage.dataset.state = state;
+    if (statusLabel) statusLabel.textContent = label;
+
+    if (orbLabel) {
+      orbLabel.textContent = ({
+        idle: 'SUBARU IS HERE',
+        listening: "I'M LISTENING",
+        thinking: 'GIVE ME A SECOND',
+        speaking: "I'M SPEAKING"
+      })[state] || 'SUBARU IS HERE';
+    }
   }
 
-  // NAVIGATION
-  function showView(name) {
-    $$('.view').forEach(view => {
-      view.classList.toggle(
-        'active-view',
-        view.dataset.panel === name
-      );
-    });
+  function appendMessage(role, text) {
+    const article = document.createElement('article');
 
-    $$('.rail-button').forEach(button => {
-      button.classList.toggle(
-        'active',
-        button.dataset.view === name
-      );
-    });
+    article.className =
+      `message ${role === 'user' ? 'user-message' : 'assistant-message'}`;
 
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth'
-    });
-  }
-
-  $$('[data-view]').forEach(button => {
-    button.addEventListener('click', () => {
-      showView(button.dataset.view);
-    });
-  });
-
-  // RESPONSE DISPLAY
-  function addResponse(userText, responseText, label = 'LOCAL REASONING') {
-    const placeholder = $('.response-placeholder', responseArea);
-
-    if (placeholder) placeholder.remove();
-
-    const card = document.createElement('article');
-    card.className = 'response-message';
-
-    card.innerHTML = `
-      <div class="message-meta">${escapeHTML(label)}</div>
-      <div class="message-body"></div>
-      <div class="message-actions">
-        <button class="small-action" data-action="save">
-          SAVE AS MEMORY
-        </button>
-        <button class="small-action" data-action="task">
-          ADD AS TASK
-        </button>
+    article.innerHTML = `
+      <div class="message-avatar">S<span>.</span></div>
+      <div class="bubble-wrap">
+        <div class="message-name">
+          ${role === 'user' ? 'YOU' : 'SUBARU'}
+          <span>· ${role === 'user' ? 'MESSAGE' : 'RESPONSE'}</span>
+        </div>
+        <div class="bubble"></div>
       </div>
     `;
 
-    $('.message-body', card).textContent = responseText;
+    // textContent prevents messages from being interpreted as HTML.
+    $('.bubble', article).textContent = text;
 
-    $('[data-action="save"]', card).addEventListener('click', () => {
-      addMemory(userText, true);
-    });
+    messages.appendChild(article);
+    messages.scrollTop = messages.scrollHeight;
 
-    $('[data-action="task"]', card).addEventListener('click', () => {
-      addTask(userText);
-      showView('tasks');
-    });
-
-    responseArea.prepend(card);
+    return article;
   }
 
-  // SUBARU LOCAL REASONING ENGINE
-  function localReasoning(raw) {
-    const text = raw.trim();
-    const lower = text.toLowerCase();
+  // Browser speech output.
+  // The actual voice depends on the voices installed on your device.
+  function chooseVoice() {
+    if (!('speechSynthesis' in window)) return null;
 
-    const tasks = readStore(STORAGE.tasks);
-    const memory = readStore(STORAGE.memory);
+    const voices = window.speechSynthesis.getVoices();
 
-    if (/^(hi|hello|hey|yo|good morning|good afternoon|good evening)\b/.test(lower)) {
-      return `Hey. SUBARU is online.
-
-I'm ready to help you organise tasks, structure decisions, and save useful notes.
-
-My current reasoning engine runs locally in your browser. Live AI integration has not been connected yet.`;
-    }
-
-    if (/\b(help|what can you do|capabilities|commands)\b/.test(lower)) {
-      return `SUBARU CAPABILITIES
-
-• Organise decisions into goals, options, and risks.
-• Add and manage tasks.
-• Save useful information as memory notes.
-• Accept voice input when supported by your browser.
-• Retrieve saved notes from this browser.
-
-CURRENT LIMITATIONS
-
-I cannot yet browse the internet, control other applications, or contact a live AI model from this page.
-
-Those capabilities require additional integrations.`;
-    }
-
-    if (/\b(task|todo|to-do|remind|remember to|organise|organize)\b/.test(lower)) {
-      return `Let's turn that into an actionable task.
-
-Suggested next step:
-${text}
-
-Use ADD AS TASK below to add this request to your task list.
-
-Note: this prototype does not send background notifications yet.`;
-    }
-
-    if (/\b(decide|decision|choose|choice|should i|pros and cons|what should)\b/.test(lower)) {
-      return `DECISION ANALYSIS
-
-1. GOAL
-Identify the outcome that matters most.
-
-2. OPTIONS
-List at least two realistic choices.
-
-3. CONSTRAINTS
-Consider time, money, effort, and other people affected.
-
-4. RISKS
-Identify what could go wrong and whether the decision can be reversed.
-
-5. NEXT ACTION
-Choose the smallest useful step that gives you more information.
-
-YOUR SITUATION
-"${text}"
-
-I can structure your thinking, but this local prototype cannot yet use a live AI model to analyse complex situations in depth.`;
-    }
-
-    if (/\b(plan|schedule|today|week|study|study plan)\b/.test(lower)) {
-      const openTasks = tasks.filter(task => !task.done);
-
-      const notes = memory
-        .slice(0, 3)
-        .map(item => `• ${item.text}`)
-        .join('\n');
-
-      return `PLANNING MODE
-
-1. Choose your most important outcome.
-2. Divide it into tasks of roughly 20–45 minutes.
-3. Start with the highest-priority task.
-4. Leave time for breaks and unexpected delays.
-5. Review your progress at the end.
-
-OPEN TASKS: ${openTasks.length}
-${notes ? `\nSAVED CONTEXT:\n${notes}` : ''}
-
-Tell me your deadline and available time for a more specific plan.`;
-    }
-
-    if (/\b(memory|saved|what do you know|what do you remember)\b/.test(lower)) {
-      if (!memory.length) {
-        return `LOCAL MEMORY
-
-No notes have been saved yet.
-
-Open Memory to save preferences, useful information, or context.
-
-Your notes are stored in this browser.`;
-      }
-
-      return `LOCAL MEMORY
-
-${memory.map((item, index) =>
-        `${index + 1}. ${item.text}`
-      ).join('\n')}
-
-These notes are stored in this browser.`;
-    }
-
-    return `MESSAGE RECEIVED
-
-"${text}"
-
-A useful starting point:
-
-• Define the desired outcome.
-• Separate known facts from assumptions.
-• Identify realistic options.
-• Consider possible risks.
-• Choose one useful next action.
-
-This is the early SUBARU prototype. The interface, local task manager, and memory system work independently of a live AI model.
-
-A secure backend and AI integration will be needed for more advanced reasoning.`;
+    return (
+      voices.find(v =>
+        /en-IN/i.test(v.lang) &&
+        /google|natural|neural/i.test(v.name)
+      ) ||
+      voices.find(v => /en-IN/i.test(v.lang)) ||
+      voices.find(v =>
+        /^en(-|$)/i.test(v.lang) &&
+        /google|natural|neural/i.test(v.name)
+      ) ||
+      voices.find(v => /^en(-|$)/i.test(v.lang)) ||
+      null
+    );
   }
 
-  // MESSAGE SUBMISSION
-  function submitPrompt(value = promptInput.value) {
-    const text = value.trim();
-
-    if (!text) {
-      showToast('Type a message first.');
-      promptInput.focus();
+  function speak(text) {
+    if (!('speechSynthesis' in window)) {
+      showToast('Speech output is not supported in this browser.');
       return;
     }
 
-    setCoreState('THINKING');
+    window.speechSynthesis.cancel();
 
-    const sendButton = $('#send-button');
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voice = chooseVoice();
 
-    if (sendButton) sendButton.disabled = true;
+    if (voice) utterance.voice = voice;
 
-    setTimeout(() => {
-      addResponse(text, localReasoning(text));
+    utterance.lang = voice?.lang || 'en-IN';
+    utterance.rate = 1.02;
+    utterance.pitch = 0.88;
+    utterance.volume = 1;
 
-      promptInput.value = '';
+    utterance.onstart = () => {
+      setState('speaking', 'SPEAKING');
+    };
 
-      if (sendButton) sendButton.disabled = false;
+    utterance.onend = () => {
+      setState(
+        'idle',
+        API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
+      );
+    };
 
-      setCoreState('STANDING BY');
-    }, 320);
+    utterance.onerror = () => {
+      setState(
+        'idle',
+        API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
+      );
+    };
+
+    window.speechSynthesis.speak(utterance);
   }
 
-  $('#send-button').addEventListener('click', () => {
-    submitPrompt();
+  // Honest fallback while the AI backend is disconnected.
+  function localReply(text) {
+    const message = text.toLowerCase();
+
+    if (/^(hi|hey|hello|yo)\b/.test(message)) {
+      return "Hey. Subaru here. I'm listening. What's on your mind?";
+    }
+
+    if (/\bwho are you\b|\bwhat are you\b/.test(message)) {
+      return "I'm Subaru, your personal assistant. My interface is running, but my full AI brain still needs the secure backend connection.";
+    }
+
+    if (/\bhelp\b|\bwhat can you do\b/.test(message)) {
+      return "I can receive your messages and use your browser's speech features. Once the backend is connected, I'll be able to use a real AI model for conversation and reasoning. Right now, I'm in local mode.";
+    }
+
+    return "I received your message. My AI backend isn't connected yet, so I won't pretend to have fully analysed it. Connect the backend to activate my real AI reasoning.";
+  }
+
+  // Real AI requests go to your separate backend.
+  async function askAI(text) {
+    if (!API_BASE_URL) {
+      return {
+        reply: localReply(text),
+        connected: false
+      };
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL.replace(/\/$/, '')}/api/chat`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: text
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+
+      throw new Error(
+        data.error || `Backend returned HTTP ${response.status}.`
+      );
+    }
+
+    const data = await response.json();
+
+    if (typeof data.reply !== 'string' || !data.reply.trim()) {
+      throw new Error('The AI backend returned an empty response.');
+    }
+
+    return {
+      reply: data.reply.trim(),
+      connected: true
+    };
+  }
+
+  async function sendMessage(value = input.value) {
+    const text = value.trim();
+
+    if (!text || isBusy) return;
+
+    appendMessage('user', text);
+
+    input.value = '';
+    input.style.height = 'auto';
+
+    isBusy = true;
+    sendButton.disabled = true;
+
+    setState('thinking', 'THINKING');
+
+    try {
+      const result = await askAI(text);
+
+      appendMessage('assistant', result.reply);
+
+      connectionLabel.textContent = result.connected
+        ? 'AI CONNECTED'
+        : 'LOCAL MODE · AI NOT CONNECTED';
+
+      if (result.connected) {
+        speak(result.reply);
+      } else {
+        setState('idle', 'LOCAL MODE');
+      }
+    } catch (error) {
+      appendMessage(
+        'assistant',
+        `I couldn't reach my AI brain: ${error.message}\n\nCheck that the backend is running and its URL is configured correctly.`
+      );
+
+      setState('idle', 'CONNECTION ERROR');
+
+      showToast('Could not connect to Subaru’s AI backend.');
+    } finally {
+      isBusy = false;
+      sendButton.disabled = false;
+      input.focus();
+    }
+  }
+
+  sendButton.addEventListener('click', () => {
+    sendMessage();
   });
 
-  promptInput.addEventListener('keydown', event => {
+  input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      submitPrompt();
+      sendMessage();
     }
   });
 
-  $$('.quick-chip').forEach(button => {
-    button.addEventListener('click', () => {
-      promptInput.value = button.dataset.prompt;
-      submitPrompt();
-    });
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+
+    input.style.height =
+      `${Math.min(input.scrollHeight, 150)}px`;
   });
 
-  // VOICE INPUT
+  // Stop voice output.
+  stopButton.addEventListener('click', () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    setState(
+      'idle',
+      API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
+    );
+  });
+
+  // Voice input.
   const SpeechRecognition =
     window.SpeechRecognition ||
     window.webkitSpeechRecognition;
 
-  const voiceButton = $('#voice-button');
-
   if (SpeechRecognition) {
-    const recognition = new SpeechRecognition();
+    recognition = new SpeechRecognition();
 
     recognition.lang = 'en-IN';
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
-      voiceButton.classList.add('listening');
-      setCoreState('LISTENING');
-      showToast('Listening...');
+      setState('listening', 'LISTENING');
+      micButton.classList.add('listening');
     };
 
     recognition.onresult = event => {
-      promptInput.value = event.results[0][0].transcript;
-      setCoreState('STANDING BY');
-      submitPrompt();
+      input.value = event.results[0][0].transcript;
+      sendMessage();
     };
 
     recognition.onerror = () => {
-      showToast('Voice input stopped. Try typing instead.');
+      showToast('Could not hear that clearly. Try again or type.');
     };
 
     recognition.onend = () => {
-      voiceButton.classList.remove('listening');
+      micButton.classList.remove('listening');
 
-      if (coreState.textContent === 'LISTENING') {
-        setCoreState('STANDING BY');
+      if (stage.dataset.state === 'listening') {
+        setState(
+          'idle',
+          API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
+        );
       }
     };
 
-    voiceButton.addEventListener('click', () => {
+    micButton.addEventListener('click', () => {
       try {
         recognition.start();
       } catch {
-        showToast('Voice input is already active.');
+        showToast('Voice recognition is already active.');
       }
     });
   } else {
-    voiceButton.addEventListener('click', () => {
-      showToast(
-        'Voice input is unavailable in this browser. Try Chrome or type your message.'
-      );
+    micButton.addEventListener('click', () => {
+      showToast('Voice input may require Chrome on Android.');
     });
   }
 
-  // TASK MANAGER
-  function addTask(text) {
-    const clean = String(text || '').trim();
-
-    if (!clean) return;
-
-    const tasks = readStore(STORAGE.tasks);
-
-    tasks.unshift({
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      text: clean,
-      done: false,
-      createdAt: new Date().toISOString()
-    });
-
-    if (writeStore(STORAGE.tasks, tasks)) {
-      renderTasks();
-      showToast('Task added.');
-    }
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = () => {};
   }
 
-  function renderTasks() {
-    const tasks = readStore(STORAGE.tasks);
-    const list = $('#task-list');
+  // Initial state.
+  connectionLabel.textContent = API_BASE_URL
+    ? 'AI CONNECTED'
+    : 'LOCAL MODE · AI NOT CONNECTED';
 
-    list.innerHTML = '';
-
-    tasks.forEach(task => {
-      const item = document.createElement('div');
-
-      item.className = `task-item${task.done ? ' done' : ''}`;
-
-      item.innerHTML = `
-        <button class="task-check"
-          aria-label="${task.done ? 'Mark incomplete' : 'Mark complete'}">
-          ${task.done ? '✓' : ''}
-        </button>
-
-        <div class="task-text"></div>
-
-        <button class="delete-button" aria-label="Delete task">
-          ×
-        </button>
-      `;
-
-      $('.task-text', item).textContent = task.text;
-
-      $('.task-check', item).addEventListener('click', () => {
-        const updated = readStore(STORAGE.tasks).map(current =>
-          current.id === task.id
-            ? { ...current, done: !current.done }
-            : current
-        );
-
-        writeStore(STORAGE.tasks, updated);
-        renderTasks();
-      });
-
-      $('.delete-button', item).addEventListener('click', () => {
-        const updated = readStore(STORAGE.tasks).filter(
-          current => current.id !== task.id
-        );
-
-        writeStore(STORAGE.tasks, updated);
-        renderTasks();
-        showToast('Task deleted.');
-      });
-
-      list.append(item);
-    });
-
-    const openCount = tasks.filter(task => !task.done).length;
-
-    $('#task-count').textContent =
-      `${openCount} OPEN TASK${openCount === 1 ? '' : 'S'}`;
-
-    $('#tasks-empty').style.display =
-      tasks.length ? 'none' : 'block';
-  }
-
-  $('#task-form').addEventListener('submit', event => {
-    event.preventDefault();
-
-    const input = $('#task-input');
-
-    if (!input.value.trim()) return;
-
-    addTask(input.value);
-    input.value = '';
-  });
-
-  $('#clear-completed').addEventListener('click', () => {
-    const remaining = readStore(STORAGE.tasks).filter(
-      task => !task.done
-    );
-
-    writeStore(STORAGE.tasks, remaining);
-    renderTasks();
-    showToast('Completed tasks cleared.');
-  });
-
-  // LOCAL MEMORY
-  function addMemory(text, quiet = false) {
-    const clean = String(text || '').trim();
-
-    if (!clean) {
-      showToast('Write a note first.');
-      return;
-    }
-
-    const memories = readStore(STORAGE.memory);
-
-    memories.unshift({
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      text: clean,
-      createdAt: new Date().toISOString()
-    });
-
-    if (writeStore(STORAGE.memory, memories)) {
-      renderMemories();
-
-      showToast(
-        quiet
-          ? 'Saved to local memory.'
-          : 'Memory saved on this device.'
-      );
-    }
-  }
-
-  function renderMemories() {
-    const memories = readStore(STORAGE.memory);
-    const list = $('#memory-list');
-
-    list.innerHTML = '';
-
-    memories.forEach(memory => {
-      const item = document.createElement('article');
-
-      item.className = 'memory-item';
-
-      const date = new Date(memory.createdAt);
-
-      item.innerHTML = `
-        <div class="memory-content">
-          <p></p>
-          <div class="memory-date"></div>
-        </div>
-
-        <button class="delete-button" aria-label="Delete memory">
-          ×
-        </button>
-      `;
-
-      $('.memory-content p', item).textContent = memory.text;
-
-      $('.memory-date', item).textContent =
-        Number.isNaN(date.getTime())
-          ? 'SAVED NOTE'
-          : `SAVED ${date.toLocaleDateString()}`;
-
-      $('.delete-button', item).addEventListener('click', () => {
-        const updated = readStore(STORAGE.memory).filter(
-          note => note.id !== memory.id
-        );
-
-        writeStore(STORAGE.memory, updated);
-        renderMemories();
-        showToast('Memory deleted.');
-      });
-
-      list.append(item);
-    });
-
-    $('#memory-empty').style.display =
-      memories.length ? 'none' : 'block';
-  }
-
-  $('#memory-form').addEventListener('submit', event => {
-    event.preventDefault();
-
-    const input = $('#memory-input');
-
-    if (!input.value.trim()) return;
-
-    addMemory(input.value);
-    input.value = '';
-  });
-
-  // INITIALISE SUBARU
-  renderTasks();
-  renderMemories();
-
+  setState(
+    'idle',
+    API_BASE_URL ? 'AI ONLINE' : 'LOCAL MODE'
+  );
 })();
