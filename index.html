@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b0c">
+  <meta name="description" content="SUBARU — your personal command center.">
+  <title>SUBARU — Personal Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Main navigation">
+      <a class="brand-mark" href="#home" aria-label="SUBARU home">S<span>.</span></a>
+      <nav class="rail-nav">
+        <button class="rail-button active" data-view="home" aria-label="Home" title="Home"><span class="nav-glyph">⌂</span></button>
+        <button class="rail-button" data-view="tasks" aria-label="Tasks" title="Tasks"><span class="nav-glyph">✓</span></button>
+        <button class="rail-button" data-view="memory" aria-label="Memory" title="Memory"><span class="nav-glyph">◈</span></button>
+      </nav>
+      <div class="rail-bottom"><span class="status-dot"></span><span class="rail-version">V 0.1</span></div>
+    </aside>
+
+    <main class="main-content" id="home">
+      <header class="topbar">
+        <div class="wordmark">SUBARU<span class="orange">.</span><div class="wordmark-sub">PERSONAL INTELLIGENCE</div></div>
+        <div class="system-status"><span class="status-dot"></span><span>LOCAL CORE ONLINE</span></div>
+      </header>
+
+      <section class="view active-view" id="home-view" data-panel="home">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="eyebrow-line"></span> YOUR COMMAND CENTER</p>
+            <h1>Make a move.<br><span class="muted-heading">I'll think it through.</span></h1>
+            <p class="hero-description">A personal assistant in progress. Give me a problem, a plan, or a task to organise.</p>
+            <div class="quick-actions">
+              <button class="quick-chip" data-prompt="Help me make a plan for today.">Plan my day <span>↗</span></button>
+              <button class="quick-chip" data-prompt="Help me think through a difficult decision.">Think through a decision <span>↗</span></button>
+              <button class="quick-chip" data-prompt="Help me organise my tasks.">Organise tasks <span>↗</span></button>
+            </div>
+          </div>
+
+          <div class="core-stage" aria-label="SUBARU core status">
+            <div class="core-coordinate">CORE / 001</div>
+            <div class="core-orbit orbit-one"></div><div class="core-orbit orbit-two"></div><div class="core-orbit orbit-three"></div>
+            <div class="core-ring"><div class="core-inner"><span class="core-s">S</span><span class="core-pulse"></span></div></div>
+            <div class="core-caption"><span class="status-dot"></span><span id="core-state">STANDING BY</span></div>
+            <div class="core-decoration deco-left">01<br><span>REASON</span></div><div class="core-decoration deco-right">02<br><span>ACT</span></div>
+          </div>
+        </div>
+
+        <section class="workspace">
+          <div class="section-heading"><div><p class="eyebrow">INTERFACE</p><h2>What's on your mind?</h2></div><span class="mono-label">TEXT / VOICE</span></div>
+          <div class="composer-card">
+            <label class="sr-only" for="prompt-input">Message SUBARU</label>
+            <textarea id="prompt-input" rows="2" placeholder="Tell me what you're trying to do..."></textarea>
+            <div class="composer-footer"><span class="composer-hint">ENTER TO SEND <span class="hint-divider">/</span> SHIFT + ENTER FOR NEW LINE</span><div class="composer-actions"><button id="voice-button" class="icon-button" title="Use voice input" aria-label="Use voice input">⌁</button><button id="send-button" class="send-button">SEND <span>↗</span></button></div></div>
+          </div>
+          <div class="response-area" id="response-area" aria-live="polite">
+            <div class="response-placeholder"><span class="placeholder-icon">✳</span><div><strong>Ready when you are.</strong><p>Your conversation will appear here.</p></div></div>
+          </div>
+        </section>
+
+        <section class="bottom-grid">
+          <article class="info-card"><div class="card-topline"><span class="card-index">01</span><span class="card-symbol">◈</span></div><p class="eyebrow">MEMORY</p><h3>Context, not clutter.</h3><p>Saved notes stay on this device in this prototype. You stay in control of what gets stored.</p><button class="text-link" data-view="memory">OPEN MEMORY <span>↗</span></button></article>
+          <article class="info-card"><div class="card-topline"><span class="card-index">02</span><span class="card-symbol">✓</span></div><p class="eyebrow">EXECUTION</p><h3>Think. Then do.</h3><p>Keep tasks organised and mark them complete. Connected actions will come in later versions.</p><button class="text-link" data-view="tasks">VIEW TASKS <span>↗</span></button></article>
+        </section>
+        <footer class="footer-note"><span>SUBARU / EARLY BUILD</span><span>LOCAL PROTOTYPE · NO LIVE AI CONNECTED</span></footer>
+      </section>
+
+      <section class="view" id="tasks-view" data-panel="tasks">
+        <div class="page-intro"><p class="eyebrow"><span class="eyebrow-line"></span> EXECUTION LAYER</p><h1>Tasks<span class="orange">.</span></h1><p>Capture the next move. Keep the list simple.</p></div>
+        <form class="task-form" id="task-form"><label class="sr-only" for="task-input">New task</label><input id="task-input" maxlength="180" placeholder="Add a task..." autocomplete="off"><button class="send-button" type="submit">ADD <span>+</span></button></form>
+        <div class="task-summary"><span id="task-count">0 OPEN TASKS</span><button id="clear-completed" class="text-link">CLEAR COMPLETED</button></div>
+        <div id="task-list" class="task-list"></div>
+        <div class="empty-state" id="tasks-empty"><span>✓</span><h3>Clear runway.</h3><p>Your tasks will show up here.</p></div>
+      </section>
+
+      <section class="view" id="memory-view" data-panel="memory">
+        <div class="page-intro"><p class="eyebrow"><span class="eyebrow-line"></span> CONTEXT LAYER</p><h1>Memory<span class="orange">.</span></h1><p>Save useful context for this browser on this device.</p></div>
+        <form class="memory-form" id="memory-form"><label class="sr-only" for="memory-input">Memory note</label><textarea id="memory-input" rows="3" maxlength="500" placeholder="For example: I prefer short, practical explanations."></textarea><button class="send-button" type="submit">SAVE NOTE <span>↗</span></button></form>
+        <div class="privacy-note"><span>◈</span><p><strong>Local by default.</strong> Notes are stored in this browser's local storage. They are not synced between devices and may disappear if browser data is cleared.</p></div>
+        <div class="memory-list" id="memory-list"></div>
+        <div class="empty-state" id="memory-empty"><span>◈</span><h3>Nothing saved yet.</h3><p>Add a preference or a useful piece of context.</p></div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="script.js"></script>
+</body>
+</html>
