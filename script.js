@@ -17,7 +17,7 @@
   // Add your deployed backend URL here later.
   // Example: https://your-subaru-api.example.com
   // Never put your private API key in this file.
-  const API_BASE_URL = '';
+  const API_BASE_URL = 'https://saul-goodman-81en.onrender.com';
 
   let toastTimer;
   let recognition = null;
